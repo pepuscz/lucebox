@@ -348,6 +348,11 @@ struct ModelBackend {
     virtual bool snapshot_used(int slot) const = 0;
     virtual int  snapshot_cur_pos(int slot) const = 0;
 
+    // True only when restore_and_generate(source, req) may safely save
+    // req.snap_slot over the same physical slot after restoring source state
+    // into independent live KV. Backends opt in after validating that order.
+    virtual bool supports_inplace_snapshot_promotion() const { return false; }
+
     // RESTORE <slot> <prompt_path> <n_gen> — restore snapshot + generate.
     // Backend handles the diff-prefill and decode internally.
     GenerateResult restore_and_generate(int slot, const GenerateRequest & req,

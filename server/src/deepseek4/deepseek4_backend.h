@@ -65,6 +65,7 @@ public:
     void snapshot_free(int slot) override;
     bool snapshot_used(int slot) const override;
     int  snapshot_cur_pos(int slot) const override;
+    bool supports_inplace_snapshot_promotion() const override { return true; }
 
     GenerateResult restore_and_generate_impl(int slot,
                                              const GenerateRequest & req,

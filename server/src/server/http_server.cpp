@@ -3612,12 +3612,19 @@ void HttpServer::remember_agent_turn(
     if (pending.first < 0 || pending.second != canonical_end) return;
 
     const int slot = pending.first;
-    if (slot == source_slot) {
+    if (slot == source_slot &&
+        !backend_.supports_inplace_snapshot_promotion()) {
         prefix_cache_.cancel_inline_snap(slot);
         return;
     }
+    // An opted-in backend restores the source into independent live KV before
+    // replacing the same physical slot at the deeper boundary. Keeping the
+    // reservation lets confirm_inline_snap() replace the old key atomically
+    // after successful replay, without holding a second full snapshot.
     forget_inline_slot_metadata(slot);
-    backend_.snapshot_free(slot);
+    if (slot != source_slot) {
+        backend_.snapshot_free(slot);
+    }
 
     GenerateRequest replay;
     replay.prompt = canonical_tokens;
