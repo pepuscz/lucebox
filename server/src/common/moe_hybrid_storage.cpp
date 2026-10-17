@@ -316,10 +316,17 @@ static bool assign_cold_experts(const MoeHybridConfig & cfg, int il,
         dst.n_streamed = materialized ? 0 : (int)dst.cold_expert_ids.size();
         return true;
     }
-    if (cfg.cold_expert_ids.size() != (size_t)cfg.n_layer || duplicate_hot_on_cold || !materialized) {
+    // An explicit empty list is allowed without a materialized cold stack:
+    // the layer then has hot, foreign and streamed experts only (an
+    // expert-parallel cluster rank without a secondary owner,
+    // server/src/cluster).
+    const bool empty_cold = cfg.cold_expert_ids.size() == (size_t)cfg.n_layer &&
+                            cfg.cold_expert_ids[(size_t)il].empty();
+    if (cfg.cold_expert_ids.size() != (size_t)cfg.n_layer || duplicate_hot_on_cold ||
+        (!materialized && !empty_cold)) {
         if (err) {
             *err = "explicit cold-stack owners need one list per layer, a materialized "
-                   "cold stack and no duplicated hot experts";
+                   "cold stack (or an empty list) and no duplicated hot experts";
         }
         return false;
     }

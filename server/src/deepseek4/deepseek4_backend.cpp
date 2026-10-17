@@ -640,6 +640,14 @@ struct Ds4MoeTpConfig {
     bool profile_hot_on_secondary = false;
 };
 
+// LUCE_CLUSTER_RANK_STREAM=1: an expert-parallel cluster rank keeps the part of
+// its share that fits no device in the streamed tier (read from the model file
+// on demand) instead of refusing to start. Every rank must then have the whole
+// model file: a sparse per-rank copy holds no streamed expert.
+static bool ds4_cluster_rank_stream_enabled() {
+    return env_flag_enabled("LUCE_CLUSTER_RANK_STREAM");
+}
+
 static Ds4MoeTpConfig ds4_moe_tp_config(int local_gpu) {
     Ds4MoeTpConfig result;
     result.requested = env_flag_enabled("LUCE_DS4_MOE_TP");
@@ -2239,11 +2247,17 @@ bool DeepSeek4Backend::apply_expert_ownership(bool secondary_owner, int secondar
                     own.at(il, e) == MoeExpertOwnership::Stream) ++demoted;
             }
         }
-        if (demoted > 0) {
+        if (demoted > 0 && !ds4_cluster_rank_stream_enabled()) {
             std::fprintf(stderr, "[deepseek4-cluster] %d of this rank's experts do not fit its "
                                  "primary and secondary devices; lower LUCE_EXPERT_BUDGET_MB or "
-                                 "--max-ctx, or give the rank fewer experts\n", demoted);
+                                 "--max-ctx, give the rank fewer experts, or set "
+                                 "LUCE_CLUSTER_RANK_STREAM=1 (every rank holds the whole model file)\n",
+                         demoted);
             return false;
+        }
+        if (demoted > 0) {
+            std::fprintf(stderr, "[deepseek4-cluster] rank %d streams %d of its experts from the model "
+                                 "file (LUCE_CLUSTER_RANK_STREAM=1)\n", cluster_->rank(), demoted);
         }
         hybrid_cfg.foreign_expert_ids = foreign;
     }
@@ -3791,9 +3805,17 @@ bool DeepSeek4Backend::init_hybrid_model() {
     const int host_spill_gpu = same_runtime_tp ? tp.secondary_gpu : -1;
     if (cluster_) {
         if (!inprocess_tp) {
-            std::fprintf(stderr, "[deepseek4-cluster] a cluster rank needs the secondary "
-                                 "expert owner (--expert-device)\n");
-            return fail_hybrid_init();
+            // No secondary owner on this rank (a discrete card beside the
+            // head's card and APU): the single-card layout, its share
+            // resident on the target and, with LUCE_CLUSTER_RANK_STREAM=1,
+            // the rest of it streamed from the model file. Explicit empty
+            // cold lists keep the other ranks' experts masked
+            // (assign_cold_experts); cold owner None would skip them silently.
+            hybrid_cfg.cold_expert_ids.assign((size_t) w_.n_layer, {});
+            std::fprintf(stderr, "[deepseek4-cluster] rank %d has no secondary expert owner: its share "
+                                 "stays on the target device%s\n", cluster_->rank(),
+                         ds4_cluster_rank_stream_enabled() ? ", the rest of it streamed from the model file"
+                                                           : " (LUCE_CLUSTER_RANK_STREAM=1 would stream the rest)");
         }
         const char * hotness_env = std::getenv("LUCE_DS4_HOTNESS_CSV");
         const std::string hotness_csv = hotness_env ? hotness_env : "";

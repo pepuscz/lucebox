@@ -240,3 +240,57 @@ TEST_CASE(MoeHybridStorageFixture, fractional_route_quota_rounds_over_the_batch)
 
     ggml_free(ctx);
 }
+
+// An expert-parallel cluster rank without a secondary owner: explicit empty
+// cold lists keep the foreign masking (the other ranks' experts never run
+// here) while the rest of this rank's share is streamed from the file; a
+// non-empty list without a materialized cold stack is still refused.
+TEST_CASE(MoeHybridStorageFixture, empty_explicit_cold_lists_without_a_cold_stack) {
+    auto backend = std::unique_ptr<ggml_backend, decltype(&ggml_backend_free)>(
+        ggml_backend_cpu_init(), ggml_backend_free);
+    auto ctx = std::unique_ptr<ggml_context, decltype(&ggml_free)>(
+        ggml_init({1u << 20, nullptr, true}), ggml_free);
+    REQUIRE(backend && ctx);
+    constexpr int n_expert = 4;
+    MoeLayerDesc desc;
+    desc.ffn_gate_exps = ggml_new_tensor_3d(ctx.get(), GGML_TYPE_F32, 4, 8, n_expert);
+    desc.ffn_up_exps = ggml_new_tensor_3d(ctx.get(), GGML_TYPE_F32, 4, 8, n_expert);
+    desc.ffn_down_exps = ggml_new_tensor_3d(ctx.get(), GGML_TYPE_F32, 8, 4, n_expert);
+    auto weights = std::unique_ptr<ggml_backend_buffer, decltype(&ggml_backend_buffer_free)>(
+        ggml_backend_alloc_ctx_tensors(ctx.get(), backend.get()), ggml_backend_buffer_free);
+    REQUIRE(weights != nullptr);
+
+    MoeHybridConfig cfg;
+    cfg.n_embd = 4;
+    cfg.n_expert = n_expert;
+    cfg.n_expert_used = 1;
+    cfg.n_ff_exp = 8;
+    cfg.n_layer = 1;
+    cfg.materialize_cold_experts = false;   // the single-card layout: streamed, no cold stack
+    cfg.cold_expert_ids = {{}};             // ... and explicitly none, so foreign experts are masked
+    cfg.foreign_expert_ids = {{2}};   // another rank's expert
+    MoeHybridPlacement placement;
+    placement.n_layer = 1;
+    placement.n_expert = n_expert;
+    placement.n_expert_used = 1;
+    placement.hot_counts = {1};
+    placement.hot_expert_ids = {{0}};
+    placement.total_hot = 1;
+    std::string err;
+    MoeHybridStorage storage;
+    REQUIRE(build_moe_hybrid_storage(cfg, backend.get(), placement, {desc}, storage, &err, nullptr));
+    REQUIRE(storage.layers.size() == 1);
+    const MoeHybridLayerStorage & layer = storage.layers[0];
+    CHECK(layer.cold_expert_ids.empty());
+    CHECK(layer.foreign_routes);
+    REQUIRE(layer.foreign_by_global.size() == (size_t) n_expert);
+    CHECK(layer.foreign_by_global[2] == 1);
+    CHECK(layer.foreign_by_global[1] == 0);
+    CHECK(layer.n_streamed == 2);     // experts 1 and 3: not hot, not foreign
+    CHECK(storage.streams_cold_experts());
+
+    cfg.cold_expert_ids = {{1}};      // a cold stack that nothing materializes
+    MoeHybridStorage refused;
+    CHECK(!build_moe_hybrid_storage(cfg, backend.get(), placement, {desc}, refused, &err, nullptr));
+    CHECK(err.find("materialized") != std::string::npos);
+}
