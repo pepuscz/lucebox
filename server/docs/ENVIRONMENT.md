@@ -185,6 +185,7 @@ profile and the requirements checked at startup.
 - `LUCE_DS4_HYBRID_PREFILL_GPU_HC` - deepseek4_graph.cpp
 - `LUCE_DS4_Q5_VERIFY` - deepseek4_backend.cpp, deepseek4_dspark_spec.cpp, deepseek4_fused_verify.inc, deepseek4_graph.cpp (gfx1151 DSpark default =1: five-row fused verifier and the 24-slot cache; =0 restores the q<=4 verifier)
 - `LUCE_DS4_SECONDARY_BUDGET_MB` - deepseek4_backend.cpp (explicit cap on the secondary expert stack; on an APU whose device memory is GTT the automatic capacity counts device free and host spill twice and demotes nothing)
+- `LUCE_DS4_STREAM_LOADERS` - deepseek4_backend.cpp (loader threads of the streamed expert cache, the queue depth the drive sees; default 4)
 - `LUCE_DS4_STREAM_CACHE_MB` - deepseek4_backend.cpp (cap on the streamed expert cache pool; default: all device memory left beyond the headroom, which on an all-GTT APU is host memory the drafter and the kernel still need)
 - `LUCE_DS4_STREAM_CACHE_RESERVE_EXTRA_MB` - deepseek4_backend.cpp (extra free memory the streamed cache leaves beyond the device headroom; default 0)
 - `LUCE_DS4_HOST_KEEP_MB` - deepseek4_backend.cpp (host memory the integrated secondary's expert stack leaves free; default 5120; raise it on a box whose APU tier is all GTT so a drafter placed on the APU still fits)

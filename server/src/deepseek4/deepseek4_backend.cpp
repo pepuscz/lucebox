@@ -3175,6 +3175,14 @@ bool DeepSeek4Backend::init_streamed_expert_tier() {
         if (mb > 0) cache_opts.reserve_bytes += (size_t) mb << 20;
     }
     cache_opts.direct_path = cfg_.model_path;
+    // LUCE_DS4_STREAM_LOADERS: loader threads of the streamed cache (default 4).
+    // Each reads one expert as a few direct multi-MiB reads, so this is the
+    // queue depth the drive sees; a DRAM-less NVMe at depth 4 delivered ~1.7 GB/s
+    // where it does 3.6 GB/s at depth 8 (19 Oct, Kingston OM8TAP4).
+    if (const char * env = std::getenv("LUCE_DS4_STREAM_LOADERS"); env && *env) {
+        const int n = std::atoi(env);
+        if (n >= 1 && n <= 64) cache_opts.n_loaders = n;
+    }
     // Once experts are locked in host memory the page cache is too small to
     // hold the streamed tier, so every load reads the drive directly.
     cache_opts.direct_all = ggml_backend_cuda_host_spill_bytes(cache_opts.device) > 0;
