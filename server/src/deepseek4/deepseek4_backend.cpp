@@ -2188,6 +2188,19 @@ bool DeepSeek4Backend::apply_expert_ownership(bool secondary_owner, int secondar
         }
         const uint64_t capacity = (free_bytes > carve_reserve ? free_bytes - carve_reserve : 0) + host_bytes;
         secondary_budget = capacity;
+        // LUCE_DS4_SECONDARY_BUDGET_MB: explicit cap on the secondary expert stack.
+        // On an APU whose device memory is GTT (a 1 GiB carve), device free and
+        // host spill are the same RAM and `capacity` counts it twice (215 GiB on
+        // a 124 GiB box), so the fit never demotes anything and the stack fills
+        // the host. The surplus of the placement is demoted one tier as usual.
+        if (const char * env = std::getenv("LUCE_DS4_SECONDARY_BUDGET_MB"); env && *env) {
+            const long long mb = std::atoll(env);
+            if (mb > 0 && ((uint64_t) mb << 20) < secondary_budget) secondary_budget = (uint64_t) mb << 20;
+        }
+        std::fprintf(stderr, "[deepseek4] secondary expert budget %.2f GiB (device free %.2f GiB, carve reserve %.2f GiB, "
+                     "host spill %.2f GiB, capacity %.2f GiB)\n", secondary_budget / 1073741824.0,
+                     free_bytes / 1073741824.0, carve_reserve / 1073741824.0, host_bytes / 1073741824.0,
+                     capacity / 1073741824.0);
     }
 
     MoeExpertOwnership own;
