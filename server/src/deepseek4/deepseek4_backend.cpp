@@ -3149,9 +3149,18 @@ bool DeepSeek4Backend::init_streamed_expert_tier() {
     if (!hybrid || !hybrid->stream_engine || stream_cache_device_ < 0) return true;
     std::string err;
     // The cache takes what the device has left beyond its headroom.
+    // LUCE_DS4_STREAM_CACHE_RESERVE_EXTRA_MB keeps more than the headroom free
+    // (buffers allocated after the cache otherwise push the device under the
+    // headroom check by a few tens of MiB on an APU whose device memory is all
+    // GTT); LUCE_DS4_STREAM_CACHE_MB caps the pool, which on such an APU is
+    // host memory the drafter and the kernel still need.
     MoeExpertCacheOptions cache_opts;
     cache_opts.device = stream_cache_device_;
     cache_opts.reserve_bytes = ds4_device_headroom_bytes(cache_opts.device);
+    if (const char * env = std::getenv("LUCE_DS4_STREAM_CACHE_RESERVE_EXTRA_MB"); env && *env) {
+        const long long mb = std::atoll(env);
+        if (mb > 0) cache_opts.reserve_bytes += (size_t) mb << 20;
+    }
     cache_opts.direct_path = cfg_.model_path;
     // Once experts are locked in host memory the page cache is too small to
     // hold the streamed tier, so every load reads the drive directly.
@@ -3160,6 +3169,14 @@ bool DeepSeek4Backend::init_streamed_expert_tier() {
         size_t free_b = 0, total_b = 0;
         ggml_backend_cuda_get_device_memory(cache_opts.device, &free_b, &total_b);
         cache_opts.pool_bytes = free_b > cache_opts.reserve_bytes ? free_b - cache_opts.reserve_bytes : 0;
+        if (const char * env = std::getenv("LUCE_DS4_STREAM_CACHE_MB"); env && *env) {
+            const long long mb = std::atoll(env);
+            if (mb > 0 && ((size_t) mb << 20) < cache_opts.pool_bytes) cache_opts.pool_bytes = (size_t) mb << 20;
+        }
+        std::fprintf(stderr, "[deepseek4] streamed expert cache pool %.2f GiB on device %d "
+                     "(free %.2f of %.2f GiB, reserve %.2f GiB)\n",
+                     cache_opts.pool_bytes / 1073741824.0, cache_opts.device,
+                     free_b / 1073741824.0, total_b / 1073741824.0, cache_opts.reserve_bytes / 1073741824.0);
         if (cache_opts.pool_bytes > 0 &&
             init_deepseek4_streamed_expert_cache(w_, *hybrid, cache_opts, expert_cache_, &err)) {
             hybrid->expert_cache = &expert_cache_;
