@@ -184,6 +184,8 @@ profile and the requirements checked at startup.
 - `LUCE_DS4_HYBRID_PREFILL_EAGER` - deepseek4_graph.cpp, moe_hybrid_ffn_eval.cpp
 - `LUCE_DS4_HYBRID_PREFILL_GPU_HC` - deepseek4_graph.cpp
 - `LUCE_DS4_Q5_VERIFY` - deepseek4_backend.cpp, deepseek4_dspark_spec.cpp, deepseek4_fused_verify.inc, deepseek4_graph.cpp (gfx1151 DSpark default =1: five-row fused verifier and the 24-slot cache; =0 restores the q<=4 verifier)
+- `LUCE_DS4_HOST_KEEP_MB` - deepseek4_backend.cpp (host memory the integrated secondary's expert stack leaves free; default 5120; raise it on a box whose APU tier is all GTT so a drafter placed on the APU still fits)
+- `LUCE_DS4_APU_HEADROOM_MB` - deepseek4_backend.cpp (free memory an integrated device must keep at load and half of it while serving; default 4096)
 - `LUCE_DS4_PINNED_ROLLBACK` - deepseek4_dspark_spec.cpp (gfx1151 DSpark default =1: pinned host rollback state; =0 restores pageable copies)
 - `LUCE_DS4_DEVICE_ROLLBACK` - deepseek4/deepseek4_dspark_spec.cpp
 - `LUCE_DS4_ASYNC_ROLLBACK` - deepseek4_dspark_spec.cpp (=1: stream-ordered per-row rollback copies when device staging is off)

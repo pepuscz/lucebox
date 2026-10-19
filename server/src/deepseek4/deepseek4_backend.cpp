@@ -2119,7 +2119,16 @@ bool DeepSeek4Backend::apply_routing_adjustments() {
 // (n_hc + 1) * n_embd floats per token of at most one pass span, on the host).
 static uint64_t ds4_host_reserve_bytes(const DeepSeek4Weights & w, int max_ctx) {
     const int span = std::min(std::max(0, max_ctx), DS4_LAYER_MAJOR_PROMPT_SPAN);
-    return (5ULL << 30) + (uint64_t) span * (uint64_t) (w.n_hc + 1) * (uint64_t) w.n_embd * sizeof(float);
+    uint64_t keep = 5ULL << 30;
+    // LUCE_DS4_HOST_KEEP_MB: host memory the secondary expert stack must leave
+    // free (default 5 GiB). A box whose APU tier is all GTT (1 GiB carve) fills
+    // every available byte otherwise, and a drafter placed on the APU afterwards
+    // has nowhere to go.
+    if (const char * env = std::getenv("LUCE_DS4_HOST_KEEP_MB"); env && *env) {
+        const long long mb = std::atoll(env);
+        if (mb > 0) keep = (uint64_t) mb << 20;
+    }
+    return keep + (uint64_t) span * (uint64_t) (w.n_hc + 1) * (uint64_t) w.n_embd * sizeof(float);
 }
 
 // The streamed expert cache an integrated secondary keeps in its carve when
@@ -3121,7 +3130,16 @@ bool DeepSeek4Backend::init() {
 static size_t ds4_device_headroom_bytes(int device) {
     cudaDeviceProp prop{};
     const bool integrated = cudaGetDeviceProperties(&prop, device) == cudaSuccess && prop.integrated;
-    return integrated ? ((size_t) 4 << 30) : ((size_t) 3 << 29);
+    // LUCE_DS4_APU_HEADROOM_MB: the free memory an integrated device must keep
+    // (default 4 GiB; discrete cards keep 1.5 GiB regardless).
+    if (integrated) {
+        if (const char * env = std::getenv("LUCE_DS4_APU_HEADROOM_MB"); env && *env) {
+            const long long mb = std::atoll(env);
+            if (mb > 0) return (size_t) mb << 20;
+        }
+        return (size_t) 4 << 30;
+    }
+    return (size_t) 3 << 29;
 }
 
 // Streamed expert cache, sized from what is left after
